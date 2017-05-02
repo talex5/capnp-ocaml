@@ -1,0 +1,3 @@
+[submodule "src/tests/capnproto"]
+	path = src/tests/capnproto
+	url = https://github.com/kentonv/capnproto.git
