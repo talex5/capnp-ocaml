@@ -1626,6 +1626,12 @@ let test_int_accessors _ctx =
   assert_raises_invalid_arg (fun () -> B.u_int64_field_set_int_exn root (-1))
 
 
+type Capnp.MessageSig.attachments += Test_attachments of [`None | `Object] array ref
+
+let unwrap = function
+  | Test_attachments x -> x
+  | _ -> failwith "unwrap: not Test_attachments!"
+
 let test_any_pointers _ctx =
   let root  = T.Builder.TestAnyPointer.init_root () in
   let ptr = T.Builder.TestAnyPointer.any_pointer_field_get root in
@@ -1639,9 +1645,10 @@ let test_any_pointers _ctx =
   ignore (T.Builder.TestAnyPointer.any_pointer_field_set_reader root None);
   assert_equal ~printer:(fun f -> f) "" (T.Reader.TestSturdyRefHostId.host_get rchild);
   (* Interfaces *)
-  T.Builder.TestAnyPointer.any_pointer_field_set_interface root (Some (Uint32.of_int 42));
+  let index = Uint32.of_int 42 in
+  T.Builder.TestAnyPointer.any_pointer_field_set_interface root (Some index);
   let iface = T.Reader.TestAnyPointer.any_pointer_field_get_interface rroot in
-  assert_equal iface (Some (Uint32.of_int 42))
+  assert_equal iface (Some index)
 
 
 let encoding_suite =
