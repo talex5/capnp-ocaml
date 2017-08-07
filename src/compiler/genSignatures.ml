@@ -139,18 +139,31 @@ let generate_one_field_accessors ~context ~scope ~mode field
               field_name
               (GenCommon.type_name ~context ~mode ~scope_mode:mode scope tp); ];
         ]
-      | Interface _ -> [
-          Getter [
-            "val " ^ field_name ^ "_get : t -> Uint32.t option"; ];
+      | Interface _ ->
+        let cap_type =
+          GenCommon.type_name ~context ~mode:Mode.Reader ~scope_mode:mode scope tp
+        in [
+          Getter ([
+            sprintf "val %s_get : t -> %s RPC.Capability.t option"
+              field_name cap_type
+          ] @ (
+                if mode = Mode.Reader then (
+                  [
+                    sprintf "val %s_get_pipelined : t RPC.StructRef.t -> %s RPC.Capability.t"
+                      field_name cap_type
+                  ]
+                ) else []
+          ));
           Setter [
-            "val " ^ field_name ^ "_set : t -> Uint32.t option -> unit"; ];
+            sprintf "val %s_set : t -> %s RPC.Capability.t option -> unit"
+              field_name cap_type; ];
         ]
       | AnyPointer _ -> [
           Getter [
             sprintf "val %s_get : t -> %s"
               field_name
               (GenCommon.type_name ~context ~mode ~scope_mode:mode scope tp);
-            sprintf "val %s_get_interface : t -> Uint32.t option"
+            sprintf "val %s_get_interface : t -> 'a RPC.Capability.t option"
               field_name ];
           Setter [
             sprintf "val %s_set : t -> %s -> %s"
@@ -161,7 +174,7 @@ let generate_one_field_accessors ~context ~scope ~mode field
               field_name
               (GenCommon.type_name ~context ~mode:Mode.Reader ~scope_mode:mode scope tp)
               (GenCommon.type_name ~context ~mode ~scope_mode:mode scope tp);
-            sprintf "val %s_set_interface : t -> Uint32.t option -> unit"
+            sprintf "val %s_set_interface : t -> 'a RPC.Capability.t option -> unit"
               field_name ];
         ]
       | List list_descr ->
@@ -218,10 +231,17 @@ let generate_one_field_accessors ~context ~scope ~mode field
       | Struct _ -> [
           Getter [
             "val has_" ^ field_name ^ " : t -> bool"; ];
-          Getter [
+          Getter ([
             sprintf "val %s_get : t -> %s"
               field_name
-              (GenCommon.type_name ~context ~mode ~scope_mode:mode scope tp); ];
+              (GenCommon.type_name ~context ~mode ~scope_mode:mode scope tp);
+          ] @ (
+            if mode = Mode.Reader then [
+              sprintf "val %s_get_pipelined : t RPC.StructRef.t -> %s RPC.StructRef.t"
+                field_name
+                (GenCommon.type_name ~context ~mode ~scope_mode:mode scope tp);
+            ] else []
+          ));
           Setter [
             sprintf "val %s_set_reader : t -> %s -> %s"
               field_name
@@ -404,8 +424,24 @@ let generate_service ~context ~nested_modules ~interface_node interface_def : st
       )
     |> List.concat
   in
-  nested_modules @ method_mods
-
+  let server =
+    let body =
+      List.map methods ~f:(fun m ->
+          sprintf "method virtual %s_impl : (%s.t, %s.t) RPC.Service.method_t"
+            (Method.ocaml_name m)
+            (Method.(payload_module Params) ~context ~mode:Mode.Reader m)
+            (Method.(payload_module Results) ~context ~mode:Mode.Builder m)
+        )
+    in
+    [ "class virtual service : object";
+      "  inherit RPC.Untyped.generic_service";
+    ] @
+    (apply_indent ~indent:"  " body) @
+    [ "end";
+      "val local : #service -> t RPC.Capability.t";
+    ]
+  in
+  nested_modules @ method_mods @ server
 
 (* Generate the OCaml type signature corresponding to a node.  [scope] is
  * a stack of scope IDs corresponding to this lexical context, and is used to figure out

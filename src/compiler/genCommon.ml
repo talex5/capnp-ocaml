@@ -78,6 +78,10 @@ module Mode = struct
   type t =
     | Reader
     | Builder
+
+  let flip = function
+    | Reader -> Builder
+    | Builder -> Reader
 end
 
 
@@ -684,7 +688,9 @@ let generate_union_type ~context ~(mode : Mode.t) scope fields =
         | PS.Type.Void ->
             ("  | " ^ field_name) :: acc
         | PS.Type.Interface _ ->
-            (sprintf "  | %s of Uint32.t option" field_name)
+            (sprintf "  | %s of %s RPC.Capability.t option"
+             field_name
+             (type_name ~context ~mode ~scope_mode:mode scope field_type))
             :: acc
         | _ ->
             ("  | " ^ field_name ^ " of " ^
@@ -782,6 +788,41 @@ let generate_enum_sig ?unique_module_name enum_def =
       match_case :: acc)
   in
   header @ variants
+
+
+let method_param_types ~method_name:uq_name ~context node =
+  let struct_name =
+    let node_id = PS.Node.id_get node in
+    sprintf "struct_%s_%s" uq_name (Uint64.to_string node_id)
+  in
+  let reader_name = make_unique_typename ~uq_name ~context ~mode:Mode.Reader node in
+  let builder_name = make_unique_typename ~uq_name ~context ~mode:Mode.Builder node in
+  [
+    (builder_name, `Public (struct_name ^ " builder_t"));
+    (reader_name, `Public (struct_name ^ " reader_t"));
+    (struct_name, `Abstract);
+  ]
+
+
+let method_types ~context interface_def =
+  let methods = PS.Node.Interface.methods_get_list interface_def in
+  List.map methods ~f:(fun method_def ->
+      let method_name = PS.Method.name_get method_def in
+      let make_auto struct_id =
+        let struct_node = Context.node context struct_id in
+        if PS.Node.scope_id_get struct_node = Uint64.zero then (
+          match PS.Node.get struct_node with
+          | PS.Node.Struct _ ->
+            method_param_types ~method_name ~context struct_node
+          | _ ->
+            failf "Method payload %s is not a struct!" (PS.Node.display_name_get struct_node)
+        ) else []
+      in
+      let params = make_auto @@ PS.Method.param_struct_type_get method_def in
+      let result = make_auto @@ PS.Method.result_struct_type_get method_def in
+      params @ result
+    )
+  |> List.concat
 
 
 (* Recurse through the schema, emitting uniquely-named modules for
